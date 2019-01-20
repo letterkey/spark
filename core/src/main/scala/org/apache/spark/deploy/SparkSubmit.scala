@@ -850,6 +850,7 @@ private[spark] class SparkSubmit extends Logging {
     }
 
     try {
+      // 反射调用 应用程序的main方法 并运行 至此 正式运行用户的应用程序
       app.start(childArgs.toArray, sparkConf)
     } catch {
       case t: Throwable =>
