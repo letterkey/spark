@@ -89,6 +89,7 @@ private[deploy] class DriverRunner(
           }
 
           // prepare driver jars and run driver
+          // 创建本地目录； 下载jar file等并启动 driver进程
           val exitCode = prepareAndRunDriver()
 
           // set final state depending on if forcibly killed and process exit code

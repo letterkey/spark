@@ -570,6 +570,7 @@ private[spark] class SparkSubmit extends Logging {
       OptionAssigner(localJars, ALL_CLUSTER_MGRS, CLIENT, confKey = "spark.repl.local.jars")
     )
 
+    // 如果部署方式为client：即driver在提交app的主机上，直接启动用户编写的class
     // In client mode, launch the application main class directly
     // In addition, add the main application jar and any added jars (if any) to the classpath
     if (deployMode == CLIENT) {
@@ -621,6 +622,7 @@ private[spark] class SparkSubmit extends Logging {
       sparkConf.set(JARS, jars)
     }
 
+    // spark独立模式中的deploy=cluster时有两种方式：1.rest方式提交；2.rpc方式提交
     // In standalone cluster mode, use the REST client to submit the application (Spark 1.3+).
     // All Spark parameters are expected to be passed to the client through system properties.
     if (args.isStandaloneCluster) {
@@ -653,6 +655,7 @@ private[spark] class SparkSubmit extends Logging {
       setRMPrincipal(sparkConf)
     }
 
+    // 如果亿master=yarn deploy-mode=cluster 则 提交如下main class
     // In yarn-cluster mode, use yarn.Client as a wrapper around the user class
     if (isYarnCluster) {
       childMainClass = YARN_CLUSTER_SUBMIT_CLASS
@@ -810,6 +813,7 @@ private[spark] class SparkSubmit extends Logging {
 
     var mainClass: Class[_] = null
 
+
     try {
       mainClass = Utils.classForName(childMainClass)
     } catch {
@@ -850,7 +854,11 @@ private[spark] class SparkSubmit extends Logging {
     }
 
     try {
-      // 反射调用 应用程序的main方法 并运行 至此 正式运行用户的应用程序
+      // 反射调用 应用程序的main方法 并运行 至此 正式运行用户的应用程序；
+      // childMainClass:如果deploy-mode=cluster时候：会根据master=x的选择来启动对应的main方法，
+      // 如果deploy-mode=client，则直接启动用户编写的main方法；
+      // 即：即Driver启动在执行spark-submit命令的节点
+      // childMainClass的详细选择判断见function：prepareSubmitEnvironment
       app.start(childArgs.toArray, sparkConf)
     } catch {
       case t: Throwable =>

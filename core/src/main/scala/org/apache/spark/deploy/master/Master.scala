@@ -423,7 +423,7 @@ private[deploy] class Master(
   }
 
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
-    case RequestSubmitDriver(description) =>
+    case RequestSubmitDriver(description) =>  // 接收到提交 用户 job的启动driver请求
       if (state != RecoveryState.ALIVE) {
         val msg = s"${Utils.BACKUP_STANDALONE_MASTER_PREFIX}: $state. " +
           "Can only accept driver submissions in ALIVE state."
@@ -434,6 +434,7 @@ private[deploy] class Master(
         persistenceEngine.addDriver(driver)
         waitingDrivers += driver
         drivers.add(driver)
+        // 开始调度driver和分配有资源可以执行executor 的work节点 :启动driver和executor进程
         schedule()
 
         // TODO: It might be good to instead have the submission client poll the master to determine
@@ -731,9 +732,11 @@ private[deploy] class Master(
       return
     }
     // Drivers take strict precedence over executors
+    // 对活着的work节点进行随机排序
     val shuffledAliveWorkers = Random.shuffle(workers.toSeq.filter(_.state == WorkerState.ALIVE))
     val numWorkersAlive = shuffledAliveWorkers.size
     var curPos = 0
+    // 1.启动driver:启动driver逻辑比较简单，直接找到一个空闲的内存和cpu大于 driver的要求的work节点进行启动driver;没有所谓的节点距离计算
     for (driver <- waitingDrivers.toList) { // iterate over a copy of waitingDrivers
       // We assign workers to each waiting driver in a round-robin fashion. For each driver, we
       // start from the last worker that was assigned a driver, and continue onwards until we have
@@ -744,13 +747,14 @@ private[deploy] class Master(
         val worker = shuffledAliveWorkers(curPos)
         numWorkersVisited += 1
         if (worker.memoryFree >= driver.desc.mem && worker.coresFree >= driver.desc.cores) {
-          launchDriver(worker, driver)
+          launchDriver(worker, driver) // 提交driver进程并启动
           waitingDrivers -= driver
           launched = true
         }
         curPos = (curPos + 1) % numWorkersAlive
       }
     }
+    // 2.启动executor
     startExecutorsOnWorkers()
   }
 
@@ -1021,6 +1025,7 @@ private[deploy] class Master(
     logInfo("Launching driver " + driver.id + " on worker " + worker.id)
     worker.addDriver(driver)
     driver.worker = Some(worker)
+    // 通过目标work的RpcEndpointRef 引用 向work节点发送请求：提交driver的请求
     worker.endpoint.send(LaunchDriver(driver.id, driver.desc))
     driver.state = DriverState.RUNNING
   }
@@ -1053,6 +1058,10 @@ private[deploy] object Master extends Logging {
   val SYSTEM_NAME = "sparkMaster"
   val ENDPOINT_NAME = "Master"
 
+  /**
+    * 以= standlone模式 启动master节点
+    * @param argStrings
+    */
   def main(argStrings: Array[String]) {
     Thread.setDefaultUncaughtExceptionHandler(new SparkUncaughtExceptionHandler(
       exitOnUncaughtException = false))

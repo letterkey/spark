@@ -569,7 +569,7 @@ private[deploy] class Worker(
         }
       }
 
-    case LaunchDriver(driverId, driverDesc) =>
+    case LaunchDriver(driverId, driverDesc) =>  // 接收到master节点启动driver的请求
       logInfo(s"Asked to launch driver $driverId")
       val driver = new DriverRunner(
         conf,

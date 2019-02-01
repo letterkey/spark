@@ -63,6 +63,8 @@ private class ClientEndpoint(
   override def onStart(): Unit = {
     driverArgs.cmd match {
       case "launch" =>
+        // Spark使用DriverWrapper启动用户APP的main函数，而不是直接启动，这是为了Driver程序和启动Driver
+        // 的Worker程序共命运(源码注释中称为share fate)，即如果此Worker挂了，对应的Driver也会停止
         // TODO: We could add an env variable here and intercept it in `sc.addJar` that would
         //       truncate filesystem paths similar to what YARN does. For now, we just require
         //       people call `addJar` assuming the jar is in the same directory.
@@ -93,6 +95,7 @@ private class ClientEndpoint(
           driverArgs.cores,
           driverArgs.supervise,
           command)
+        // 向master注册driver  client 暂时的使命完成，移步到Master 类 查看receiveAndReply funcation
         asyncSendToMasterAndForwardReply[SubmitDriverResponse](
           RequestSubmitDriver(driverDescription))
 
