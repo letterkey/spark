@@ -225,6 +225,7 @@ private[spark] class DAGScheduler(
   private val messageScheduler =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("dag-scheduler-message")
 
+  // 创建事件监听新线程
   private[spark] val eventProcessLoop = new DAGSchedulerEventProcessLoop(this)
   taskScheduler.setDAGScheduler(this)
 
@@ -342,10 +343,10 @@ private[spark] class DAGScheduler(
       shuffleDep: ShuffleDependency[_, _, _],
       firstJobId: Int): ShuffleMapStage = {
     shuffleIdToMapStage.get(shuffleDep.shuffleId) match {
-      case Some(stage) =>
+      case Some(stage) =>   //如果已经生成过，直接返回
         stage
 
-      case None =>
+      case None => //如果没有生成过，创建新的stage
         // Create stages for all missing ancestor shuffle dependencies.
         getMissingAncestorShuffleDependencies(shuffleDep.rdd).foreach { dep =>
           // Even though getMissingAncestorShuffleDependencies only returns shuffle dependencies
@@ -505,15 +506,15 @@ private[spark] class DAGScheduler(
    */
   private[scheduler] def getShuffleDependencies(
       rdd: RDD[_]): HashSet[ShuffleDependency[_, _, _]] = {
-    val parents = new HashSet[ShuffleDependency[_, _, _]]
-    val visited = new HashSet[RDD[_]]
-    val waitingForVisit = new ArrayStack[RDD[_]]
+    val parents = new HashSet[ShuffleDependency[_, _, _]] // 所有的依赖的stage
+    val visited = new HashSet[RDD[_]]     // 记录访问过的RDD
+    val waitingForVisit = new ArrayStack[RDD[_]] //保存未访问过的stage
     waitingForVisit.push(rdd)
     while (waitingForVisit.nonEmpty) {
       val toVisit = waitingForVisit.pop()
       if (!visited(toVisit)) {
         visited += toVisit
-        toVisit.dependencies.foreach {
+        toVisit.dependencies.foreach { //读取rdd依赖信息
           case shuffleDep: ShuffleDependency[_, _, _] =>
             parents += shuffleDep
           case dependency =>
@@ -700,6 +701,7 @@ private[spark] class DAGScheduler(
     assert(partitions.size > 0)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
+    // 将    JobSubmitted 事件 放入dag事件监听队列中
     eventProcessLoop.post(JobSubmitted(
       jobId, rdd, func2, partitions.toArray, callSite, waiter,
       SerializationUtils.clone(properties)))
@@ -952,6 +954,16 @@ private[spark] class DAGScheduler(
     listenerBus.post(SparkListenerTaskGettingResult(taskInfo))
   }
 
+  /**
+    * 处理 job submit事件
+    * @param jobId
+    * @param finalRDD
+    * @param func
+    * @param partitions
+    * @param callSite
+    * @param listener
+    * @param properties
+    */
   private[scheduler] def handleJobSubmitted(jobId: Int,
       finalRDD: RDD[_],
       func: (TaskContext, Iterator[_]) => _,
@@ -2078,6 +2090,7 @@ private[spark] class DAGScheduler(
     taskScheduler.stop()
   }
 
+  // 启动事件监听 线程
   eventProcessLoop.start()
 }
 
@@ -2099,6 +2112,7 @@ private[scheduler] class DAGSchedulerEventProcessLoop(dagScheduler: DAGScheduler
   }
 
   private def doOnReceive(event: DAGSchedulerEvent): Unit = event match {
+    // 处理Job提交事件 collect reduce e.t
     case JobSubmitted(jobId, rdd, func, partitions, callSite, listener, properties) =>
       dagScheduler.handleJobSubmitted(jobId, rdd, func, partitions, callSite, listener, properties)
 

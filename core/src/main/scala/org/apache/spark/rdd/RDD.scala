@@ -368,9 +368,10 @@ abstract class RDD[T: ClassTag](
 
   /**
    * Return a new RDD by applying a function to all elements of this RDD.
+    * def map[U : ClassTage] 样式声明函数的返回值泛型约定
    */
   def map[U: ClassTag](f: T => U): RDD[U] = withScope {
-    val cleanF = sc.clean(f)
+    val cleanF = sc.clean(f)  // 用f做不可以序列化的对象的清除，之后返回f2    f2=f
     new MapPartitionsRDD[U, T](this, (context, pid, iter) => iter.map(cleanF))
   }
 

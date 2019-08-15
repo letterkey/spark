@@ -249,6 +249,7 @@ private[spark] class ApplicationMaster(args: ApplicationMasterArguments) extends
       // This shutdown hook should run *after* the SparkContext is shut down.
       val priority = ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY - 1
       ShutdownHookManager.addShutdownHook(priority) { () =>
+        // 可以在此处加入程序退出的hook，如根据状态报警等
         val maxAppAttempts = client.getMaxRegAttempts(sparkConf, yarnConf)
         val isLastAttempt = appAttemptId.getAttemptId() >= maxAppAttempts
 
