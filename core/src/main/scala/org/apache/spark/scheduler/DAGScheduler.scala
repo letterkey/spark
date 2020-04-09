@@ -685,6 +685,7 @@ private[spark] class DAGScheduler(
       resultHandler: (Int, U) => Unit,
       properties: Properties): JobWaiter[U] = {
     // Check to make sure we are not launching a task on a partition that does not exist.
+    // 检查任务，确保所执行的任务所在的partition存在
     val maxPartitions = rdd.partitions.length
     partitions.find(p => p >= maxPartitions || p < 0).foreach { p =>
       throw new IllegalArgumentException(
@@ -700,8 +701,10 @@ private[spark] class DAGScheduler(
 
     assert(partitions.size > 0)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
+    // 创建JobWaiter，该JobWaiter会被阻塞，直到Job完成或取消
     val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
-    // 将    JobSubmitted 事件 放入dag事件监听队列中
+    // eventProcessLoop是DAGSchedulerEventProcessLoop类的实例，
+    // 调用post方法提交JobSubmitted到event队列，eventThread后台进程会对该任务进行提交处理
     eventProcessLoop.post(JobSubmitted(
       jobId, rdd, func2, partitions.toArray, callSite, waiter,
       SerializationUtils.clone(properties)))
@@ -2101,6 +2104,7 @@ private[scheduler] class DAGSchedulerEventProcessLoop(dagScheduler: DAGScheduler
 
   /**
    * The main event loop of the DAG scheduler.
+    * 在使用post方法提交后，eventThread进程会将调用该方法进行处理 (父类EventLoop执行Thread)
    */
   override def onReceive(event: DAGSchedulerEvent): Unit = {
     val timerContext = timer.time()
