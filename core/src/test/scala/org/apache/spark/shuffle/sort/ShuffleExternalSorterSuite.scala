@@ -20,7 +20,7 @@ package org.apache.spark.shuffle.sort
 import java.lang.{Long => JLong}
 
 import org.mockito.Mockito.when
-import org.scalatest.mockito.MockitoSugar
+import org.scalatestplus.mockito.MockitoSugar
 
 import org.apache.spark._
 import org.apache.spark.executor.{ShuffleWriteMetrics, TaskMetrics}
@@ -37,7 +37,7 @@ class ShuffleExternalSorterSuite extends SparkFunSuite with LocalSparkContext wi
       .setAppName("ShuffleExternalSorterSuite")
       .set(IS_TESTING, true)
       .set(TEST_MEMORY, 1600L)
-      .set(MEMORY_FRACTION, 1.0)
+      .set(MEMORY_FRACTION, 0.9999)
 
     sc = new SparkContext(conf)
 

@@ -50,8 +50,8 @@ private[mesos] class MesosClusterPage(parent: MesosClusterUI) extends WebUIPage(
     val retryTable = UIUtils.listingTable(retryHeaders, retryRow, state.pendingRetryDrivers)
     val content =
       <p>Mesos Framework ID: {state.frameworkId}</p>
-      <div class="row-fluid">
-        <div class="span12">
+      <div class="row">
+        <div class="col-12">
           <h4>Queued Drivers:</h4>
           {queuedTable}
           <h4>Launched Drivers:</h4>
@@ -77,7 +77,7 @@ private[mesos] class MesosClusterPage(parent: MesosClusterUI) extends WebUIPage(
 
   private def driverRow(state: MesosClusterSubmissionState): Seq[Node] = {
     val id = state.driverDescription.submissionId
-    val proxy = parent.conf.getOption("spark.mesos.proxy.baseURL")
+    val proxy = parent.conf.get(PROXY_BASE_URL)
 
     val sandboxCol = if (proxy.isDefined) {
       val clusterSchedulerId = parent.scheduler.getSchedulerState().frameworkId

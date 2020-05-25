@@ -19,7 +19,6 @@ package org.apache.spark.sql.execution.aggregate
 
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
-import org.apache.spark.sql.catalyst.optimizer.NormalizeFloatingNumbers
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.streaming.{StateStoreRestoreExec, StateStoreSaveExec}
 
@@ -27,6 +26,22 @@ import org.apache.spark.sql.execution.streaming.{StateStoreRestoreExec, StateSto
  * Utility functions used by the query planner to convert our plan to new aggregation code path.
  */
 object AggUtils {
+
+  private def mayRemoveAggFilters(exprs: Seq[AggregateExpression]): Seq[AggregateExpression] = {
+    exprs.map { ae =>
+      if (ae.filter.isDefined) {
+        ae.mode match {
+          // Aggregate filters are applicable only in partial/complete modes;
+          // this method filters out them, otherwise.
+          case Partial | Complete => ae
+          case _ => ae.copy(filter = None)
+        }
+      } else {
+        ae
+      }
+    }
+  }
+
   private def createAggregate(
       requiredChildDistributionExpressions: Option[Seq[Expression]] = None,
       groupingExpressions: Seq[NamedExpression] = Nil,
@@ -35,21 +50,13 @@ object AggUtils {
       initialInputBufferOffset: Int = 0,
       resultExpressions: Seq[NamedExpression] = Nil,
       child: SparkPlan): SparkPlan = {
-    // Ideally this should be done in `NormalizeFloatingNumbers`, but we do it here because
-    // `groupingExpressions` is not extracted during logical phase.
-    val normalizedGroupingExpressions = groupingExpressions.map { e =>
-      NormalizeFloatingNumbers.normalize(e) match {
-        case n: NamedExpression => n
-        case other => Alias(other, e.name)(exprId = e.exprId)
-      }
-    }
     val useHash = HashAggregateExec.supportsAggregate(
       aggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes))
     if (useHash) {
       HashAggregateExec(
         requiredChildDistributionExpressions = requiredChildDistributionExpressions,
-        groupingExpressions = normalizedGroupingExpressions,
-        aggregateExpressions = aggregateExpressions,
+        groupingExpressions = groupingExpressions,
+        aggregateExpressions = mayRemoveAggFilters(aggregateExpressions),
         aggregateAttributes = aggregateAttributes,
         initialInputBufferOffset = initialInputBufferOffset,
         resultExpressions = resultExpressions,
@@ -61,8 +68,8 @@ object AggUtils {
       if (objectHashEnabled && useObjectHash) {
         ObjectHashAggregateExec(
           requiredChildDistributionExpressions = requiredChildDistributionExpressions,
-          groupingExpressions = normalizedGroupingExpressions,
-          aggregateExpressions = aggregateExpressions,
+          groupingExpressions = groupingExpressions,
+          aggregateExpressions = mayRemoveAggFilters(aggregateExpressions),
           aggregateAttributes = aggregateAttributes,
           initialInputBufferOffset = initialInputBufferOffset,
           resultExpressions = resultExpressions,
@@ -70,8 +77,8 @@ object AggUtils {
       } else {
         SortAggregateExec(
           requiredChildDistributionExpressions = requiredChildDistributionExpressions,
-          groupingExpressions = normalizedGroupingExpressions,
-          aggregateExpressions = aggregateExpressions,
+          groupingExpressions = groupingExpressions,
+          aggregateExpressions = mayRemoveAggFilters(aggregateExpressions),
           aggregateAttributes = aggregateAttributes,
           initialInputBufferOffset = initialInputBufferOffset,
           resultExpressions = resultExpressions,
@@ -182,7 +189,7 @@ object AggUtils {
       // Children of an AggregateFunction with DISTINCT keyword has already
       // been evaluated. At here, we need to replace original children
       // to AttributeReferences.
-      case agg @ AggregateExpression(aggregateFunction, mode, true, _) =>
+      case agg @ AggregateExpression(aggregateFunction, mode, true, _, _) =>
         aggregateFunction.transformDown(distinctColumnAttributeLookup)
           .asInstanceOf[AggregateFunction]
       case agg =>

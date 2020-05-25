@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.catalyst.expressions.aggregate
 
-import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
+import org.apache.spark.sql.catalyst.analysis.{FunctionRegistry, TypeCheckResult}
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.{TypeCheckFailure, TypeCheckSuccess}
 import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.catalyst.expressions._
@@ -33,8 +33,22 @@ import org.apache.spark.sql.types._
 @ExpressionDescription(
   usage = """
     _FUNC_(expr[, isIgnoreNull]) - Returns the first value of `expr` for a group of rows.
-      If `isIgnoreNull` is true, returns only non-null values.
-  """)
+      If `isIgnoreNull` is true, returns only non-null values.""",
+  examples = """
+    Examples:
+      > SELECT _FUNC_(col) FROM VALUES (10), (5), (20) AS tab(col);
+       10
+      > SELECT _FUNC_(col) FROM VALUES (NULL), (5), (20) AS tab(col);
+       NULL
+      > SELECT _FUNC_(col, true) FROM VALUES (NULL), (5), (20) AS tab(col);
+       5
+  """,
+  note = """
+    The function is non-deterministic because its results depends on the order of the rows
+    which may be non-deterministic after a shuffle.
+  """,
+  group = "agg_funcs",
+  since = "2.0.0")
 case class First(child: Expression, ignoreNullsExpr: Expression)
   extends DeclarativeAggregate with ExpectsInputTypes {
 
@@ -104,5 +118,5 @@ case class First(child: Expression, ignoreNullsExpr: Expression)
 
   override lazy val evaluateExpression: AttributeReference = first
 
-  override def toString: String = s"first($child)${if (ignoreNulls) " ignore nulls"}"
+  override def toString: String = s"$prettyName($child)${if (ignoreNulls) " ignore nulls"}"
 }

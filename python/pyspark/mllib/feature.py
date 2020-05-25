@@ -43,8 +43,6 @@ __all__ = ['Normalizer', 'StandardScalerModel', 'StandardScaler',
 
 class VectorTransformer(object):
     """
-    .. note:: DeveloperApi
-
     Base class for transformation of a vector or RDD of vector
     """
     def transform(self, vector):
@@ -517,6 +515,20 @@ class IDFModel(JavaVectorTransformer):
         Returns the current IDF vector.
         """
         return self.call('idf')
+
+    @since('3.0.0')
+    def docFreq(self):
+        """
+        Returns the document frequency.
+        """
+        return self.call('docFreq')
+
+    @since('3.0.0')
+    def numDocs(self):
+        """
+        Returns number of documents evaluated to compute idf
+        """
+        return self.call('numDocs')
 
 
 class IDF(object):
