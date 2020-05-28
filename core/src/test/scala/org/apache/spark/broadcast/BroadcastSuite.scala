@@ -194,11 +194,12 @@ class BroadcastSuite extends SparkFunSuite with LocalSparkContext with Encryptio
    * In between each step, this test verifies that the broadcast blocks are present only on the
    * expected nodes.
    */
-  private def testUnpersistTorrentBroadcast(distributed: Boolean, removeFromDriver: Boolean) {
+  private def testUnpersistTorrentBroadcast(distributed: Boolean,
+      removeFromDriver: Boolean): Unit = {
     val numSlaves = if (distributed) 2 else 0
 
     // Verify that blocks are persisted only on the driver
-    def afterCreation(broadcastId: Long, bmm: BlockManagerMaster) {
+    def afterCreation(broadcastId: Long, bmm: BlockManagerMaster): Unit = {
       var blockId = BroadcastBlockId(broadcastId)
       var statuses = bmm.getBlockStatus(blockId, askSlaves = true)
       assert(statuses.size === 1)
@@ -209,7 +210,7 @@ class BroadcastSuite extends SparkFunSuite with LocalSparkContext with Encryptio
     }
 
     // Verify that blocks are persisted in both the executors and the driver
-    def afterUsingBroadcast(broadcastId: Long, bmm: BlockManagerMaster) {
+    def afterUsingBroadcast(broadcastId: Long, bmm: BlockManagerMaster): Unit = {
       var blockId = BroadcastBlockId(broadcastId)
       val statuses = bmm.getBlockStatus(blockId, askSlaves = true)
       assert(statuses.size === numSlaves + 1)
@@ -220,7 +221,7 @@ class BroadcastSuite extends SparkFunSuite with LocalSparkContext with Encryptio
 
     // Verify that blocks are unpersisted on all executors, and on all nodes if removeFromDriver
     // is true.
-    def afterUnpersist(broadcastId: Long, bmm: BlockManagerMaster) {
+    def afterUnpersist(broadcastId: Long, bmm: BlockManagerMaster): Unit = {
       var blockId = BroadcastBlockId(broadcastId)
       var expectedNumBlocks = if (removeFromDriver) 0 else 1
       var statuses = bmm.getBlockStatus(blockId, askSlaves = true)
@@ -251,7 +252,7 @@ class BroadcastSuite extends SparkFunSuite with LocalSparkContext with Encryptio
       afterCreation: (Long, BlockManagerMaster) => Unit,
       afterUsingBroadcast: (Long, BlockManagerMaster) => Unit,
       afterUnpersist: (Long, BlockManagerMaster) => Unit,
-      removeFromDriver: Boolean) {
+      removeFromDriver: Boolean): Unit = {
 
     sc = if (distributed) {
       val _sc =
@@ -296,7 +297,7 @@ class BroadcastSuite extends SparkFunSuite with LocalSparkContext with Encryptio
       // Using this variable on the executors crashes them, which hangs the test.
       // Instead, crash the driver by directly accessing the broadcast value.
       intercept[SparkException] { broadcast.value }
-      intercept[SparkException] { broadcast.unpersist() }
+      intercept[SparkException] { broadcast.unpersist(blocking = true) }
       intercept[SparkException] { broadcast.destroy(blocking = true) }
     } else {
       val results = sc.parallelize(1 to partitions, partitions).map(x => (x, broadcast.value.sum))
@@ -307,9 +308,9 @@ class BroadcastSuite extends SparkFunSuite with LocalSparkContext with Encryptio
 
 package object testPackage extends Assertions {
 
-  def runCallSiteTest(sc: SparkContext) {
+  def runCallSiteTest(sc: SparkContext): Unit = {
     val broadcast = sc.broadcast(Array(1, 2, 3, 4))
-    broadcast.destroy()
+    broadcast.destroy(blocking = true)
     val thrown = intercept[SparkException] { broadcast.value }
     assert(thrown.getMessage.contains("BroadcastSuite.scala"))
   }

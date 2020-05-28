@@ -19,7 +19,6 @@ package org.apache.spark.util.collection
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-import scala.language.postfixOps
 import scala.ref.WeakReference
 
 import org.scalatest.Matchers
@@ -437,7 +436,7 @@ class ExternalAppendOnlyMapSuite extends SparkFunSuite
     val it = map.iterator
     assert(it.isInstanceOf[CompletionIterator[_, _]])
     // org.apache.spark.util.collection.AppendOnlyMap.destructiveSortedIterator returns
-    // an instance of an annonymous Iterator class.
+    // an instance of an anonymous Iterator class.
 
     val underlyingMapRef = WeakReference(map.currentMap)
 
@@ -460,7 +459,7 @@ class ExternalAppendOnlyMapSuite extends SparkFunSuite
     // https://github.com/scala/scala/blob/2.13.x/test/junit/scala/tools/testing/AssertUtil.scala
     // (lines 69-89)
     // assert(map.currentMap == null)
-    eventually(timeout(5 seconds), interval(200 milliseconds)) {
+    eventually(timeout(5.seconds), interval(200.milliseconds)) {
       System.gc()
       // direct asserts introduced some macro generated code that held a reference to the map
       val tmpIsNull = null == underlyingMapRef.get.orNull
@@ -551,7 +550,7 @@ class ExternalAppendOnlyMapSuite extends SparkFunSuite
 
   test("force to spill for external aggregation") {
     val conf = createSparkConf(loadDefaults = false)
-      .set("spark.memory.storageFraction", "0.999")
+      .set(MEMORY_STORAGE_FRACTION, 0.999)
       .set(TEST_MEMORY, 471859200L)
       .set(SHUFFLE_SORT_BYPASS_MERGE_THRESHOLD, 0)
     sc = new SparkContext("local", "test", conf)

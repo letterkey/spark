@@ -29,6 +29,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.internal.config._
 import org.apache.spark.internal.config.History._
 import org.apache.spark.internal.config.Kryo._
+import org.apache.spark.internal.config.Network._
 import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.util.Utils
 
@@ -61,9 +62,7 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
 
   @transient private lazy val reader: ConfigReader = {
     val _reader = new ConfigReader(new SparkConfigProvider(settings))
-    _reader.bindEnv(new ConfigProvider {
-      override def get(key: String): Option[String] = Option(getenv(key))
-    })
+    _reader.bindEnv((key: String) => Option(getenv(key)))
     _reader
   }
 
@@ -169,6 +168,15 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
   }
 
   /** Set multiple parameters together */
+  def setAll(settings: Iterable[(String, String)]): SparkConf = {
+    settings.foreach { case (k, v) => set(k, v) }
+    this
+  }
+
+  /**
+   * Set multiple parameters together
+   */
+  @deprecated("Use setAll(Iterable) instead", "3.0.0")
   def setAll(settings: Traversable[(String, String)]): SparkConf = {
     settings.foreach { case (k, v) => set(k, v) }
     this
@@ -391,7 +399,7 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
 
   /** Get an optional value, applying variable substitution. */
   private[spark] def getWithSubstitution(key: String): Option[String] = {
-    getOption(key).map(reader.substitute(_))
+    getOption(key).map(reader.substitute)
   }
 
   /** Get all parameters as a list of pairs */
@@ -406,7 +414,6 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
     getAll.filter { case (k, v) => k.startsWith(prefix) }
       .map { case (k, v) => (k.substring(prefix.length), v) }
   }
-
 
   /**
    * Get a parameter as an integer, falling back to a default if not set
@@ -492,11 +499,12 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
     }
   }
 
+
   /**
    * Checks for illegal or deprecated config settings. Throws an exception for the former. Not
    * idempotent - may mutate this conf object to convert deprecated settings to supported ones.
    */
-  private[spark] def validateSettings() {
+  private[spark] def validateSettings(): Unit = {
     if (contains("spark.local.dir")) {
       val msg = "Note that spark.local.dir will be overridden by the value set by " +
         "the cluster manager (via SPARK_LOCAL_DIRS in mesos/standalone/kubernetes and LOCAL_DIRS" +
@@ -540,23 +548,6 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
       }
     }
 
-    if (contains("spark.master") && get("spark.master").startsWith("yarn-")) {
-      val warning = s"spark.master ${get("spark.master")} is deprecated in Spark 2.0+, please " +
-        "instead use \"yarn\" with specified deploy mode."
-
-      get("spark.master") match {
-        case "yarn-cluster" =>
-          logWarning(warning)
-          set("spark.master", "yarn")
-          set(SUBMIT_DEPLOY_MODE, "cluster")
-        case "yarn-client" =>
-          logWarning(warning)
-          set("spark.master", "yarn")
-          set(SUBMIT_DEPLOY_MODE, "client")
-        case _ => // Any other unexpected master will be checked when creating scheduler backend.
-      }
-    }
-
     if (contains(SUBMIT_DEPLOY_MODE)) {
       get(SUBMIT_DEPLOY_MODE) match {
         case "cluster" | "client" =>
@@ -576,27 +567,18 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
       }
     }
 
-    if (contains(EXECUTOR_CORES) && contains("spark.task.cpus")) {
-      val executorCores = get(EXECUTOR_CORES)
-      val taskCpus = getInt("spark.task.cpus", 1)
-
-      if (executorCores < taskCpus) {
-        throw new SparkException(s"${EXECUTOR_CORES.key} must not be less than spark.task.cpus.")
-      }
-    }
-
-    val encryptionEnabled = get(NETWORK_ENCRYPTION_ENABLED) || get(SASL_ENCRYPTION_ENABLED)
+    val encryptionEnabled = get(NETWORK_CRYPTO_ENABLED) || get(SASL_ENCRYPTION_ENABLED)
     require(!encryptionEnabled || get(NETWORK_AUTH_ENABLED),
       s"${NETWORK_AUTH_ENABLED.key} must be enabled when enabling encryption.")
 
-    val executorTimeoutThresholdMs =
-      getTimeAsSeconds("spark.network.timeout", "120s") * 1000
+    val executorTimeoutThresholdMs = get(NETWORK_TIMEOUT) * 1000
     val executorHeartbeatIntervalMs = get(EXECUTOR_HEARTBEAT_INTERVAL)
+    val networkTimeout = NETWORK_TIMEOUT.key
     // If spark.executor.heartbeatInterval bigger than spark.network.timeout,
     // it will almost always cause ExecutorLostFailure. See SPARK-22754.
     require(executorTimeoutThresholdMs > executorHeartbeatIntervalMs, "The value of " +
-      s"spark.network.timeout=${executorTimeoutThresholdMs}ms must be greater than the value of " +
-      s"spark.executor.heartbeatInterval=${executorHeartbeatIntervalMs}ms.")
+      s"${networkTimeout}=${executorTimeoutThresholdMs}ms must be no less than the value of " +
+      s"${EXECUTOR_HEARTBEAT_INTERVAL.key}=${executorHeartbeatIntervalMs}ms.")
   }
 
   /**
@@ -604,7 +586,7 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
    * configuration out for debugging.
    */
   def toDebugString: String = {
-    getAll.sorted.map{case (k, v) => k + "=" + v}.mkString("\n")
+    Utils.redact(this, getAll).sorted.map { case (k, v) => k + "=" + v }.mkString("\n")
   }
 
 }
@@ -636,7 +618,10 @@ private[spark] object SparkConf extends Logging {
       DeprecatedConfig("spark.shuffle.service.index.cache.entries", "2.3.0",
         "Not used anymore. Please use spark.shuffle.service.index.cache.size"),
       DeprecatedConfig("spark.yarn.credentials.file.retention.count", "2.4.0", "Not used anymore."),
-      DeprecatedConfig("spark.yarn.credentials.file.retention.days", "2.4.0", "Not used anymore.")
+      DeprecatedConfig("spark.yarn.credentials.file.retention.days", "2.4.0", "Not used anymore."),
+      DeprecatedConfig("spark.yarn.services", "3.0.0", "Feature no longer available."),
+      DeprecatedConfig("spark.executor.plugins", "3.0.0",
+        "Feature replaced with new plugin API. See Monitoring documentation.")
     )
 
     Map(configs.map { cfg => (cfg.key -> cfg) } : _*)
@@ -667,12 +652,12 @@ private[spark] object SparkConf extends Logging {
         translation = s => s"${s.toLong * 10}s")),
     REDUCER_MAX_SIZE_IN_FLIGHT.key -> Seq(
       AlternateConfig("spark.reducer.maxMbInFlight", "1.4")),
-    "spark.kryoserializer.buffer" -> Seq(
+    KRYO_SERIALIZER_BUFFER_SIZE.key -> Seq(
       AlternateConfig("spark.kryoserializer.buffer.mb", "1.4",
         translation = s => s"${(s.toDouble * 1000).toInt}k")),
-    "spark.kryoserializer.buffer.max" -> Seq(
+    KRYO_SERIALIZER_MAX_BUFFER_SIZE.key -> Seq(
       AlternateConfig("spark.kryoserializer.buffer.max.mb", "1.4")),
-    "spark.shuffle.file.buffer" -> Seq(
+    SHUFFLE_FILE_BUFFER_SIZE.key -> Seq(
       AlternateConfig("spark.shuffle.file.buffer.kb", "1.4")),
     EXECUTOR_LOGS_ROLLING_MAX_SIZE.key -> Seq(
       AlternateConfig("spark.executor.logs.rolling.size.maxBytes", "1.4")),
@@ -680,13 +665,13 @@ private[spark] object SparkConf extends Logging {
       AlternateConfig("spark.io.compression.snappy.block.size", "1.4")),
     IO_COMPRESSION_LZ4_BLOCKSIZE.key -> Seq(
       AlternateConfig("spark.io.compression.lz4.block.size", "1.4")),
-    "spark.rpc.numRetries" -> Seq(
+    RPC_NUM_RETRIES.key -> Seq(
       AlternateConfig("spark.akka.num.retries", "1.4")),
-    "spark.rpc.retry.wait" -> Seq(
+    RPC_RETRY_WAIT.key -> Seq(
       AlternateConfig("spark.akka.retry.wait", "1.4")),
-    "spark.rpc.askTimeout" -> Seq(
+    RPC_ASK_TIMEOUT.key -> Seq(
       AlternateConfig("spark.akka.askTimeout", "1.4")),
-    "spark.rpc.lookupTimeout" -> Seq(
+    RPC_LOOKUP_TIMEOUT.key -> Seq(
       AlternateConfig("spark.akka.lookupTimeout", "1.4")),
     "spark.streaming.fileStream.minRememberDuration" -> Seq(
       AlternateConfig("spark.streaming.minRememberDuration", "1.5")),
@@ -694,14 +679,13 @@ private[spark] object SparkConf extends Logging {
       AlternateConfig("spark.yarn.max.worker.failures", "1.5")),
     MEMORY_OFFHEAP_ENABLED.key -> Seq(
       AlternateConfig("spark.unsafe.offHeap", "1.6")),
-    "spark.rpc.message.maxSize" -> Seq(
+    RPC_MESSAGE_MAX_SIZE.key -> Seq(
       AlternateConfig("spark.akka.frameSize", "1.6")),
     "spark.yarn.jars" -> Seq(
       AlternateConfig("spark.yarn.jar", "2.0")),
-    "spark.yarn.access.hadoopFileSystems" -> Seq(
-      AlternateConfig("spark.yarn.access.namenodes", "2.2")),
     MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM.key -> Seq(
-      AlternateConfig("spark.reducer.maxReqSizeShuffleToMem", "2.3")),
+      AlternateConfig("spark.reducer.maxReqSizeShuffleToMem", "2.3"),
+      AlternateConfig("spark.maxRemoteBlockSizeFetchToMem", "3.0")),
     LISTENER_BUS_EVENT_QUEUE_CAPACITY.key -> Seq(
       AlternateConfig("spark.scheduler.listenerbus.eventqueue.size", "2.3")),
     DRIVER_MEMORY_OVERHEAD.key -> Seq(
@@ -713,7 +697,12 @@ private[spark] object SparkConf extends Logging {
     PRINCIPAL.key -> Seq(
       AlternateConfig("spark.yarn.principal", "3.0")),
     KERBEROS_RELOGIN_PERIOD.key -> Seq(
-      AlternateConfig("spark.yarn.kerberos.relogin.period", "3.0"))
+      AlternateConfig("spark.yarn.kerberos.relogin.period", "3.0")),
+    KERBEROS_FILESYSTEMS_TO_ACCESS.key -> Seq(
+      AlternateConfig("spark.yarn.access.namenodes", "2.2"),
+      AlternateConfig("spark.yarn.access.hadoopFileSystems", "3.0")),
+    "spark.kafka.consumer.cache.capacity" -> Seq(
+      AlternateConfig("spark.sql.kafkaConsumerCache.capacity", "3.0"))
   )
 
   /**
@@ -736,7 +725,6 @@ private[spark] object SparkConf extends Logging {
    */
   def isExecutorStartupConf(name: String): Boolean = {
     (name.startsWith("spark.auth") && name != SecurityManager.SPARK_AUTH_SECRET_CONF) ||
-    name.startsWith("spark.ssl") ||
     name.startsWith("spark.rpc") ||
     name.startsWith("spark.network") ||
     isSparkPortConf(name)
